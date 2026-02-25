@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+:root {
+  --f1-red: #e10600;
+  --f1-black: #15151e;
+  --f1-white: #ffffff;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--f1-black);
+  color: var(--f1-white);
+  font-family: 'Titillium Web', sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
