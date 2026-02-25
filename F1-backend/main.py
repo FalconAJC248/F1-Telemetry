@@ -11,14 +11,23 @@ def get_races(year: int):
 
     return schedule.to_dict(orient='records')
 
+def _event_id(event_name: str) -> int | str:
+    """Convert a numeric round string to int so FastF1 looks up by round number.
+    Round 0 is reserved for testing events which FastF1 requires by name — leave as string."""
+    if event_name.isdigit():
+        n = int(event_name)
+        return n if n > 0 else event_name
+    return event_name
+
+
 def get_event(year: int, event_name: str):
-    event = fastf1.get_event(year, event_name)
+    event = fastf1.get_event(year, _event_id(event_name))
     return event.to_dict()
 
 
 def get_session_drivers(year: int, event_name: str, session_name: str) -> list[dict]:
     """Load session and return a list of participating drivers."""
-    session = fastf1.get_session(year, event_name, session_name)
+    session = fastf1.get_session(year, _event_id(event_name), session_name)
     session.load(laps=False, telemetry=False, weather=False, messages=False)
 
     def clean(val: any, default: str = "") -> str:
@@ -42,7 +51,7 @@ def get_session_drivers(year: int, event_name: str, session_name: str) -> list[d
 
 def get_driver_telemetry(year: int, event_name: str, session_name: str, driver: str) -> list[dict]:
     """Return fastest-lap telemetry for a driver, downsampled to ~500 points."""
-    session = fastf1.get_session(year, event_name, session_name)
+    session = fastf1.get_session(year, _event_id(event_name), session_name)
     session.load(laps=True, telemetry=True, weather=False, messages=False)
 
     driver_laps = session.laps[session.laps["Driver"] == driver]
@@ -83,7 +92,7 @@ def get_driver_telemetry(year: int, event_name: str, session_name: str, driver: 
 
 def get_corners(year: int, event_name: str, session_name: str) -> list[dict]:
     """Return corner apex distances for the circuit from circuit_info."""
-    session = fastf1.get_session(year, event_name, session_name)
+    session = fastf1.get_session(year, _event_id(event_name), session_name)
     session.load(laps=True, telemetry=True, weather=False, messages=False)
 
     circuit_info = session.get_circuit_info()

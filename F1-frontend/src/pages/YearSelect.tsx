@@ -45,7 +45,7 @@ export default function YearSelect() {
 
   const RaceCard = ({ race }: { race: Race }) => (
     <div
-      onClick={() => navigate(`/event/${selectedYear}/${race.RoundNumber}`)}
+      onClick={() => navigate(`/event/${selectedYear}/${encodeURIComponent(race.EventName)}`)}
       className="flex items-center gap-4 p-4 bg-[#1e1e2e] border border-gray-800 rounded-lg cursor-pointer hover:border-[#e10600] transition-colors group"
     >
       <div className="w-8 flex-shrink-0 flex items-center justify-center">

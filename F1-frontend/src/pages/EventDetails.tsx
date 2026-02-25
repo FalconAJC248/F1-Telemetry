@@ -96,9 +96,11 @@ export default function EventDetails() {
             <p className="text-gray-400">{event?.Country} · {event?.Location}</p>
           </div>
         </div>
-        <span className="text-xs font-semibold uppercase tracking-widest text-gray-600 bg-[#1e1e2e] border border-gray-800 rounded px-3 py-1.5 mt-1">
-          Round {round}
-        </span>
+        {event?.RoundNumber > 0 && (
+          <span className="text-xs font-semibold uppercase tracking-widest text-gray-600 bg-[#1e1e2e] border border-gray-800 rounded px-3 py-1.5 mt-1">
+            Round {event.RoundNumber}
+          </span>
+        )}
       </div>
 
       <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">Sessions</h2>
