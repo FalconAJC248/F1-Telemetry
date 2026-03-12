@@ -87,6 +87,30 @@ Frontend runs at **http://localhost:5173**
 | `/event/:year/:round/:session/:driver` | Telemetry chart |
 | `/upload` | Upload telemetry (coming soon) |
 
+## Ngrok Sharing
+
+All API calls are proxied through Vite, so only one ngrok tunnel is needed.
+
+Add the following to your ngrok config (`%USERPROFILE%\AppData\Local\ngrok\ngrok.yml`):
+
+```yaml
+tunnels:
+  frontend:
+    proto: http
+    addr: 5173
+    host_header: "localhost:5173"
+```
+
+Then start the tunnel:
+
+```cmd
+ngrok start --all
+```
+
+Start the backend and frontend as normal, then share the ngrok URL. Friends' API requests are proxied through Vite to your local backend — no second tunnel needed.
+
+> Note: The ngrok URL changes every session on the free tier static domain is not on the free plan.
+
 ## Features
 
 - **Telemetry chart** — speed, throttle, brake, RPM, gear, DRS plotted over lap distance

@@ -5,6 +5,7 @@ export default function Layout() {
   const { pathname } = useLocation();
 
   const navActive = pathname.startsWith('/telemetry') || pathname.startsWith('/event');
+  const liveActive = pathname === '/live';
 
   return (
     <div className="min-h-screen bg-[#15151e]">
@@ -18,7 +19,7 @@ export default function Layout() {
               <span className="text-2xl font-bold text-[#e10600]">F1</span>
               <span className="text-xl text-white ml-2 font-semibold">Telemetry</span>
             </Link>
-            <nav>
+            <nav className="flex items-center gap-6">
               <Link
                 to="/telemetry"
                 className={`text-sm font-semibold tracking-wide transition-colors relative pb-0.5 ${
@@ -28,6 +29,17 @@ export default function Layout() {
                 }`}
               >
                 Explore Races
+              </Link>
+              <Link
+                to="/live"
+                className={`text-sm font-semibold tracking-wide transition-colors relative pb-0.5 flex items-center gap-1.5 ${
+                  liveActive
+                    ? 'text-white after:absolute after:inset-x-0 after:-bottom-[17px] after:h-0.5 after:bg-[#e10600]'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-[#e10600]" />
+                Live
               </Link>
             </nav>
           </div>

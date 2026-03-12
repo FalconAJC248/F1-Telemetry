@@ -205,6 +205,8 @@ function ChartSkeleton() {
 export default function TelemetryView() {
   const { year, round, session, driver } = useParams();
   const navigate = useNavigate();
+  const hideDrs = parseInt(year ?? '0') >= 2026;
+  const metrics = METRICS.filter(m => !hideDrs || m.key !== 'drs');
   const [overlayMode, setOverlayMode] = useState(false);
   const [metric, setMetric] = useState('speed');
   const [overlayMetrics, setOverlayMetrics] = useState<string[]>(['speed', 'throttle']);
@@ -212,11 +214,13 @@ export default function TelemetryView() {
   const [showDrs, setShowDrs] = useState(true);
   const [compareDriver, setCompareDriver] = useState<string | null>(null);
   const [showDriverPicker, setShowDriverPicker] = useState(false);
+  const [compareYear, setCompareYear] = useState<string>('');
+  const [compareYearDriver, setCompareYearDriver] = useState<string>(driver ?? '');
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['telemetry', year, round, session, driver],
     queryFn: async () => {
-      const res = await fetch(`http://localhost:8000/telemetry/${year}/${round}/${encodeURIComponent(session!)}/${driver}`);
+      const res = await fetch(`/api/telemetry/${year}/${round}/${encodeURIComponent(session!)}/${driver}`);
       if (!res.ok) throw new Error('Failed to fetch telemetry');
       return res.json() as Promise<TelemetryPoint[]>;
     },
@@ -225,7 +229,7 @@ export default function TelemetryView() {
   const { data: corners } = useQuery({
     queryKey: ['corners', year, round, session],
     queryFn: async () => {
-      const res = await fetch(`http://localhost:8000/corners/${year}/${round}/${encodeURIComponent(session!)}`);
+      const res = await fetch(`/api/corners/${year}/${round}/${encodeURIComponent(session!)}`);
       if (!res.ok) return [] as Corner[];
       return res.json() as Promise<Corner[]>;
     },
@@ -235,21 +239,24 @@ export default function TelemetryView() {
   const { data: sessionDrivers } = useQuery({
     queryKey: ['session-drivers', year, round, session],
     queryFn: async () => {
-      const res = await fetch(`http://localhost:8000/session/${year}/${round}/${encodeURIComponent(session!)}`);
+      const res = await fetch(`/api/session/${year}/${round}/${encodeURIComponent(session!)}`);
       if (!res.ok) return [] as SessionDriver[];
       return res.json() as Promise<SessionDriver[]>;
     },
     enabled: showDriverPicker,
   });
 
+  const activeCompareYear = compareYear || year;
+  const activeCompareDriver = compareYear ? compareYearDriver : compareDriver;
+
   const { data: compareData, isLoading: compareLoading } = useQuery({
-    queryKey: ['telemetry', year, round, session, compareDriver],
+    queryKey: ['telemetry', activeCompareYear, round, session, activeCompareDriver],
     queryFn: async () => {
-      const res = await fetch(`http://localhost:8000/telemetry/${year}/${round}/${encodeURIComponent(session!)}/${compareDriver}`);
+      const res = await fetch(`/api/telemetry/${activeCompareYear}/${round}/${encodeURIComponent(session!)}/${activeCompareDriver}`);
       if (!res.ok) throw new Error('Failed to fetch comparison telemetry');
       return res.json() as Promise<TelemetryPoint[]>;
     },
-    enabled: !!compareDriver,
+    enabled: !!(compareDriver || compareYear),
   });
 
   const effectiveData = useMemo<MergedPoint[] | null>(() => {
@@ -296,9 +303,11 @@ export default function TelemetryView() {
   }, [data]);
 
   useEffect(() => {
-    const title = compareDriver ? `${driver} vs ${compareDriver}` : driver;
+    const title = compareYear
+      ? `${driver} ${year} vs ${compareYearDriver} ${compareYear}`
+      : compareDriver ? `${driver} vs ${compareDriver}` : driver;
     document.title = `${title} · ${session} · F1 Telemetry`;
-  }, [driver, compareDriver, session]);
+  }, [driver, compareDriver, compareYear, compareYearDriver, year, session]);
 
   // Lap summary stats
   const lapStats = useMemo(() => {
@@ -319,7 +328,7 @@ export default function TelemetryView() {
   };
 
   const addOverlayMetric = () => {
-    const next = METRICS.find(m => !overlayMetrics.includes(m.key));
+    const next = metrics.find(m => !overlayMetrics.includes(m.key));
     if (next && overlayMetrics.length < 4) setOverlayMetrics([...overlayMetrics, next.key]);
   };
 
@@ -334,7 +343,7 @@ export default function TelemetryView() {
     setOverlayMetrics(updated);
   };
 
-  const activeMetric = METRICS.find(m => m.key === metric)!;
+  const activeMetric = metrics.find(m => m.key === metric)!;
 
   return (
     <div className="text-white">
@@ -348,7 +357,9 @@ export default function TelemetryView() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold">
           {driver}
-          {compareDriver && <span className="text-gray-400 font-normal"> vs {compareDriver}</span>}
+          {compareYear
+            ? <span className="text-gray-400 font-normal"> {year} vs {compareYearDriver} {compareYear}</span>
+            : compareDriver && <span className="text-gray-400 font-normal"> vs {compareDriver}</span>}
         </h1>
         <p className="text-gray-400 mt-1">{session} · Fastest Lap Telemetry</p>
       </div>
@@ -367,7 +378,7 @@ export default function TelemetryView() {
         <>
           {/* Lap stat summary */}
           {lapStats && (
-            <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className={`grid ${hideDrs ? 'grid-cols-2' : 'grid-cols-3'} gap-3 mb-6`}>
               <div className="bg-[#1e1e2e] border border-gray-800 rounded-lg px-4 py-3">
                 <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Top Speed</p>
                 <p className="text-xl font-bold text-white">
@@ -376,7 +387,7 @@ export default function TelemetryView() {
                 </p>
                 {lapStats.topSpeedDelta !== null && (
                   <p className={`text-xs mt-0.5 font-semibold ${lapStats.topSpeedDelta > 0 ? 'text-green-400' : lapStats.topSpeedDelta < 0 ? 'text-red-400' : 'text-gray-500'}`}>
-                    {lapStats.topSpeedDelta > 0 ? '+' : ''}{lapStats.topSpeedDelta} vs {compareDriver}
+                    {lapStats.topSpeedDelta > 0 ? '+' : ''}{lapStats.topSpeedDelta} vs {compareYear ? `${compareYearDriver} ${compareYear}` : compareDriver}
                   </p>
                 )}
               </div>
@@ -386,10 +397,12 @@ export default function TelemetryView() {
                   {cornerZones.length > 0 ? cornerZones.length : <span className="text-gray-600 text-base font-normal">loading…</span>}
                 </p>
               </div>
-              <div className="bg-[#1e1e2e] border border-gray-800 rounded-lg px-4 py-3">
-                <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">DRS Zones</p>
-                <p className="text-xl font-bold text-white">{drsZones.length}</p>
-              </div>
+              {!hideDrs && (
+                <div className="bg-[#1e1e2e] border border-gray-800 rounded-lg px-4 py-3">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">DRS Zones</p>
+                  <p className="text-xl font-bold text-white">{drsZones.length}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -406,7 +419,7 @@ export default function TelemetryView() {
                     onChange={e => setMetric(e.target.value)}
                     className="bg-[#15151e] border border-gray-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#e10600] cursor-pointer"
                   >
-                    {METRICS.map(m => (
+                    {metrics.map(m => (
                       <option key={m.key} value={m.key}>{m.label}</option>
                     ))}
                   </select>
@@ -429,7 +442,7 @@ export default function TelemetryView() {
                           onChange={e => updateOverlayMetric(i, e.target.value)}
                           className="bg-[#15151e] border border-gray-700 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-[#e10600] cursor-pointer"
                         >
-                          {METRICS.map(m => (
+                          {metrics.map(m => (
                             <option key={m.key} value={m.key} disabled={overlayMetrics.includes(m.key) && m.key !== key}>
                               {m.label}
                             </option>
@@ -473,7 +486,7 @@ export default function TelemetryView() {
                         .map(d => (
                           <button
                             key={d.abbreviation}
-                            onClick={() => { setCompareDriver(d.abbreviation); setShowDriverPicker(false); }}
+                            onClick={() => { setCompareDriver(d.abbreviation); setShowDriverPicker(false); setCompareYear(''); }}
                             className="px-3 py-1.5 text-sm bg-[#15151e] border border-gray-700 rounded hover:border-white transition-colors flex items-center gap-2"
                           >
                             <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: d.team_color }} />
@@ -513,6 +526,59 @@ export default function TelemetryView() {
 
             <div className="border-t border-gray-800" />
 
+            {/* Year comparison */}
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-2">Compare Year</p>
+              {!compareYear ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[2018,2019,2020,2021,2022,2023,2024,2025,2026]
+                    .filter(y => String(y) !== year)
+                    .map(y => (
+                      <button
+                        key={y}
+                        onClick={() => { setCompareYear(String(y)); setCompareYearDriver(driver ?? ''); setCompareDriver(null); }}
+                        className="px-3 py-1.5 text-sm bg-[#15151e] border border-gray-700 rounded hover:border-white text-gray-400 hover:text-white transition-colors"
+                      >
+                        {y}
+                      </button>
+                    ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[#15151e] border border-gray-600 rounded text-sm">
+                    <span className="text-gray-400">vs</span>
+                    <input
+                      value={compareYearDriver}
+                      onChange={e => setCompareYearDriver(e.target.value.toUpperCase())}
+                      className="bg-transparent font-mono font-bold w-16 text-white focus:outline-none uppercase"
+                      placeholder={driver}
+                      maxLength={3}
+                    />
+                    <span className="text-gray-500">{compareYear}</span>
+                    {compareLoading && <span className="text-xs text-gray-500">loading…</span>}
+                  </div>
+                  <button
+                    onClick={() => setCompareYear('')}
+                    className="text-gray-500 hover:text-red-500 transition-colors text-sm px-2"
+                  >
+                    × Remove
+                  </button>
+                  <div className="flex items-center gap-4 ml-1">
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                      <svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#9ca3af" strokeWidth="2" /></svg>
+                      {driver} {year}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                      <svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#9ca3af" strokeWidth="2" strokeDasharray="5 3" /></svg>
+                      {compareYearDriver} {compareYear}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-gray-800" />
+
             {/* Zone toggles */}
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-2">Overlays</p>
@@ -523,12 +589,14 @@ export default function TelemetryView() {
                 >
                   Corners
                 </button>
-                <button
-                  onClick={() => setShowDrs(v => !v)}
-                  className={`px-3 py-1 rounded text-xs border transition-colors ${showDrs ? 'border-[#a855f7] text-[#a855f7]' : 'border-gray-700 text-gray-500 hover:border-gray-500'}`}
-                >
-                  DRS zones
-                </button>
+                {!hideDrs && (
+                  <button
+                    onClick={() => setShowDrs(v => !v)}
+                    className={`px-3 py-1 rounded text-xs border transition-colors ${showDrs ? 'border-[#a855f7] text-[#a855f7]' : 'border-gray-700 text-gray-500 hover:border-gray-500'}`}
+                  >
+                    DRS zones
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -565,20 +633,17 @@ export default function TelemetryView() {
                       overlayMode={overlayMode}
                       metricMaxes={metricMaxes}
                       driver={driver!}
-                      compareDriver={compareDriver}
+                      compareDriver={compareYear ? `${compareYearDriver} ${compareYear}` : compareDriver}
                     />
                   )}
                 />
 
-                {showDrs && drsZones.map((zone, i) => (
+                {!hideDrs && showDrs && drsZones.map((zone, i) => (
                   <ReferenceArea key={`drs-${i}`} x1={zone.start} x2={zone.end} fill={DRS_COLOR} fillOpacity={0.1} stroke="none" />
                 ))}
 
                 {showCorners && cornerZones.map(zone => (
                   <Fragment key={`${zone.number}${zone.letter}`}>
-                    {zone.entry !== null && zone.exit !== null && (
-                      <ReferenceArea x1={zone.entry} x2={zone.exit} fill={CORNER_COLOR} fillOpacity={0.12} stroke="none" />
-                    )}
                     <ReferenceLine
                       x={zone.apex}
                       stroke={CORNER_COLOR}
@@ -596,21 +661,21 @@ export default function TelemetryView() {
                       return (
                         <Fragment key={key}>
                           <Line type="monotone" dataKey={key} name={key} stroke={def.color} dot={false} strokeWidth={2} isAnimationActive={false} />
-                          {compareDriver && compareData && (
+                          {compareData && (
                             <Line type="monotone" dataKey={`${key}_2`} name={`${key}_2`} stroke={def.color} dot={false} strokeWidth={2} strokeDasharray="5 3" strokeOpacity={0.75} isAnimationActive={false} />
                           )}
                         </Fragment>
                       );
                     })}
                     <Legend
-                      formatter={(value: string) => METRICS.find(m => m.key === value.replace('_2', ''))?.label ?? value}
+                      formatter={(value: string) => metrics.find(m => m.key === value.replace('_2', ''))?.label ?? value}
                       wrapperStyle={{ paddingTop: '8px', fontSize: '12px', color: '#9ca3af' }}
                     />
                   </>
                 ) : (
                   <>
                     <Line type="monotone" dataKey={metric} stroke={activeMetric.color} dot={false} strokeWidth={2} isAnimationActive={false} />
-                    {compareDriver && compareData && (
+                    {compareData && (
                       <Line type="monotone" dataKey={`${metric}_2`} stroke={activeMetric.color} dot={false} strokeWidth={2} strokeDasharray="5 3" strokeOpacity={0.75} isAnimationActive={false} />
                     )}
                   </>
@@ -618,19 +683,15 @@ export default function TelemetryView() {
               </LineChart>
             </ResponsiveContainer>
 
-            {(showCorners && cornerZones.length > 0) || (showDrs && drsZones.length > 0) ? (
+            {(showCorners && cornerZones.length > 0) || (!hideDrs && showDrs && drsZones.length > 0) ? (
               <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-800">
-                {showCorners && cornerZones.length > 0 && <>
+                {showCorners && cornerZones.length > 0 && (
                   <div className="flex items-center gap-1.5 text-xs text-gray-500">
                     <span className="inline-block w-6 border-t border-dashed" style={{ borderColor: CORNER_COLOR }} />
                     Corner apex
                   </div>
-                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                    <span className="inline-block w-4 h-3 rounded-sm" style={{ backgroundColor: CORNER_COLOR, opacity: 0.35 }} />
-                    Braking zone
-                  </div>
-                </>}
-                {showDrs && drsZones.length > 0 && (
+                )}
+                {!hideDrs && showDrs && drsZones.length > 0 && (
                   <div className="flex items-center gap-1.5 text-xs text-gray-500">
                     <span className="inline-block w-4 h-3 rounded-sm" style={{ backgroundColor: DRS_COLOR, opacity: 0.35 }} />
                     DRS zone

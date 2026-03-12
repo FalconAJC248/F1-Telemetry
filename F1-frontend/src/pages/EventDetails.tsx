@@ -21,6 +21,23 @@ function formatDate(dateStr: string): string {
   }
 }
 
+function formatSessionDateTime(date: Date): string {
+  try {
+    return date.toLocaleDateString('en-GB', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+    });
+  } catch {
+    return '';
+  }
+}
+
+function telemetryAvailableAt(sessionName: string, sessionDate: Date): Date {
+  const isRace = /^race$/i.test(sessionName.trim());
+  const offsetHours = isRace ? 3 : 2;
+  return new Date(sessionDate.getTime() + offsetHours * 60 * 60 * 1000);
+}
+
 export default function EventDetails() {
   const { year, round } = useParams();
   const navigate = useNavigate();
@@ -29,22 +46,39 @@ export default function EventDetails() {
   const { data: event, isLoading, error } = useQuery({
     queryKey: ['event', year, round],
     queryFn: async () => {
-      const res = await fetch(`http://localhost:8000/event/${year}/${round}`);
+      const res = await fetch(`/api/event/${year}/${round}`);
       if (!res.ok) throw new Error('Failed to fetch event');
       return res.json();
     },
   });
 
+  const sessions = [
+    { key: 'Session1', name: event?.Session1, date: event?.Session1Date },
+    { key: 'Session2', name: event?.Session2, date: event?.Session2Date },
+    { key: 'Session3', name: event?.Session3, date: event?.Session3Date },
+    { key: 'Session4', name: event?.Session4, date: event?.Session4Date },
+    { key: 'Session5', name: event?.Session5, date: event?.Session5Date },
+  ].filter(s => s.name);
+
+  const selectedSessionObj = sessions.find(s => s.name === selectedSession);
+  const selectedSessionDate = selectedSessionObj?.date
+    ? new Date(String(selectedSessionObj.date))
+    : null;
+  const telemetryAvailable = selectedSessionDate && selectedSession
+    ? telemetryAvailableAt(selectedSession, selectedSessionDate)
+    : null;
+  const isUpcoming = telemetryAvailable ? telemetryAvailable > new Date() : false;
+
   const { data: drivers, isLoading: driversLoading } = useQuery({
     queryKey: ['session-drivers', year, round, selectedSession],
     queryFn: async () => {
       const res = await fetch(
-        `http://localhost:8000/session/${year}/${round}/${encodeURIComponent(selectedSession!)}`
+        `/api/session/${year}/${round}/${encodeURIComponent(selectedSession!)}`
       );
       if (!res.ok) throw new Error('Failed to fetch session drivers');
       return res.json() as Promise<Driver[]>;
     },
-    enabled: !!selectedSession,
+    enabled: !!selectedSession && !isUpcoming,
   });
 
   useEffect(() => {
@@ -64,14 +98,6 @@ export default function EventDetails() {
       <button onClick={() => window.location.reload()} className="text-sm text-gray-400 hover:text-white border border-gray-700 rounded px-4 py-2 transition-colors">Retry</button>
     </div>
   );
-
-  const sessions = [
-    { key: 'Session1', name: event?.Session1, date: event?.Session1Date },
-    { key: 'Session2', name: event?.Session2, date: event?.Session2Date },
-    { key: 'Session3', name: event?.Session3, date: event?.Session3Date },
-    { key: 'Session4', name: event?.Session4, date: event?.Session4Date },
-    { key: 'Session5', name: event?.Session5, date: event?.Session5Date },
-  ].filter(s => s.name);
 
   return (
     <div className="text-white">
@@ -133,7 +159,16 @@ export default function EventDetails() {
           <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">
             {selectedSession} — Drivers
           </h2>
-          {driversLoading ? (
+          {isUpcoming ? (
+            <div className="py-10 px-6 border border-dashed border-gray-800 rounded-lg text-center">
+              <p className="text-gray-300 font-medium mb-1">This session hasn't happened yet</p>
+              {telemetryAvailable && (
+                <p className="text-gray-500 text-sm">
+                  Check back at {formatSessionDateTime(telemetryAvailable)} for telemetry
+                </p>
+              )}
+            </div>
+          ) : driversLoading ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
               {[...Array(10)].map((_, i) => (
                 <div key={i} className="h-20 bg-[#1e1e2e] rounded-lg animate-pulse" />

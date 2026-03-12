@@ -33,7 +33,7 @@ export default function YearSelect() {
   const { data: races, isLoading, error } = useQuery<Race[]>({
     queryKey: ['races', selectedYear],
     queryFn: async () => {
-      const res = await fetch(`http://localhost:8000/races/${selectedYear}`);
+      const res = await fetch(`/api/races/${selectedYear}`);
       if (!res.ok) throw new Error('Failed to fetch races');
       return res.json();
     },

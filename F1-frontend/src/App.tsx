@@ -7,6 +7,7 @@ import YearSelect from './pages/YearSelect';
 import EventDetails from './pages/EventDetails';
 import TelemetryView from './pages/TelemetryView';
 import UploadTelemetry from './pages/UploadTelemetry';
+import LiveTiming from './pages/LiveTiming';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +28,7 @@ function App() {
             <Route path="telemetry" element={<YearSelect />} />
             <Route path="event/:year/:round" element={<EventDetails />} />
             <Route path="event/:year/:round/:session/:driver" element={<TelemetryView />} />
+            <Route path="live" element={<LiveTiming />} />
             <Route path="upload" element={<UploadTelemetry />} />
           </Route>
         </Routes>

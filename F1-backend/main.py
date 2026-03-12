@@ -1,10 +1,41 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import asyncio
+import json
 import math
+import threading
+from contextlib import asynccontextmanager
 
-### functions
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+
+from Livetiming.broadcaster import Broadcaster
+from Livetiming.ingestor import F1Ingestor
 
 import fastf1
+
+# --- Live timing singletons ---
+broadcaster = Broadcaster()
+ingestor = F1Ingestor(use_auth=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Register the running event loop with the broadcaster so it can use
+    # call_soon_threadsafe from the ingestor thread.
+    broadcaster.set_loop(asyncio.get_event_loop())
+
+    # Subscribe the broadcaster to all ingestor updates.
+    ingestor.subscribe(broadcaster.broadcast)
+
+    # Start the ingestor in a daemon thread so it doesn't block the server.
+    thread = threading.Thread(target=ingestor.start, daemon=True, name="f1-ingestor")
+    thread.start()
+
+    yield  # Server is running
+
+    ingestor.stop()
+
+
+### functions
 
 def get_races(year: int):
     schedule = fastf1.get_event_schedule(year)
@@ -27,8 +58,11 @@ def get_event(year: int, event_name: str):
 
 def get_session_drivers(year: int, event_name: str, session_name: str) -> list[dict]:
     """Load session and return a list of participating drivers."""
-    session = fastf1.get_session(year, _event_id(event_name), session_name)
-    session.load(laps=False, telemetry=False, weather=False, messages=False)
+    try:
+        session = fastf1.get_session(year, _event_id(event_name), session_name)
+        session.load(laps=False, telemetry=False, weather=False, messages=False)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Session data unavailable: {e}")
 
     def clean(val: any, default: str = "") -> str:
         s = str(val)
@@ -51,12 +85,21 @@ def get_session_drivers(year: int, event_name: str, session_name: str) -> list[d
 
 def get_driver_telemetry(year: int, event_name: str, session_name: str, driver: str) -> list[dict]:
     """Return fastest-lap telemetry for a driver, downsampled to ~500 points."""
-    session = fastf1.get_session(year, _event_id(event_name), session_name)
-    session.load(laps=True, telemetry=True, weather=False, messages=False)
+    try:
+        session = fastf1.get_session(year, _event_id(event_name), session_name)
+        session.load(laps=True, telemetry=True, weather=False, messages=False)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Session data unavailable: {e}")
 
     driver_laps = session.laps[session.laps["Driver"] == driver]
-    fastest = driver_laps.pick_fastest()
-    tel = fastest.get_telemetry()
+    if driver_laps.empty:
+        raise HTTPException(status_code=404, detail=f"No laps found for driver {driver}")
+
+    try:
+        fastest = driver_laps.pick_fastest()
+        tel = fastest.get_telemetry()
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Telemetry unavailable for {driver}: {e}")
 
     step = max(1, len(tel) // 500)
     tel = tel.iloc[::step]
@@ -92,8 +135,11 @@ def get_driver_telemetry(year: int, event_name: str, session_name: str, driver: 
 
 def get_corners(year: int, event_name: str, session_name: str) -> list[dict]:
     """Return corner apex distances for the circuit from circuit_info."""
-    session = fastf1.get_session(year, _event_id(event_name), session_name)
-    session.load(laps=True, telemetry=True, weather=False, messages=False)
+    try:
+        session = fastf1.get_session(year, _event_id(event_name), session_name)
+        session.load(laps=True, telemetry=True, weather=False, messages=False)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Session data unavailable: {e}")
 
     circuit_info = session.get_circuit_info()
     if circuit_info is None:
@@ -120,11 +166,12 @@ def get_corners(year: int, event_name: str, session_name: str) -> list[dict]:
 
 
 ### create fastapi app
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"],
+    allow_origin_regex=r"https://.*\.ngrok-free\.dev",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -156,3 +203,67 @@ def telemetry(year: int, event_name: str, session_name: str, driver: str):
 def corners(year: int, event_name: str, session_name: str):
     """Return corner apex positions for the circuit."""
     return get_corners(year, event_name, session_name)
+
+
+@app.get("/circuit/{year}/{event_name}/{session_name}")
+def circuit_layout(year: int, event_name: str, session_name: str):
+    """Return X/Y track coordinates for drawing the circuit outline.
+
+    Loads the fastest lap's position telemetry and downsamples to ~400 points.
+    Coordinates are in 1/10 metre, same system as the live Position.z feed.
+    Falls back to the previous year if the current year has no data yet.
+    """
+    def _load(y: int):
+        s = fastf1.get_session(y, _event_id(event_name), session_name)
+        s.load(laps=True, telemetry=True, weather=False, messages=False)
+        lap = s.laps.pick_fastest()
+        return lap.get_pos_data()
+
+    try:
+        pos = _load(year)
+    except Exception:
+        try:
+            pos = _load(year - 1)
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Circuit data unavailable: {e}")
+
+    step = max(1, len(pos) // 400)
+    pos = pos.iloc[::step]
+
+    return {
+        "x": [round(float(v)) for v in pos["X"]],
+        "y": [round(float(v)) for v in pos["Y"]],
+    }
+
+
+@app.websocket("/ws/live")
+async def live_websocket(websocket: WebSocket):
+    """Live timing WebSocket endpoint.
+
+    On connect: sends a full state snapshot so the client can initialise.
+    Ongoing: pushes every topic update as it arrives from the ingestor.
+
+    Message format:
+        Snapshot: {"type": "snapshot", "data": {topic: state, ...}}
+        Update:   {"type": "update", "topic": str, "data": {...}}
+    """
+    await websocket.accept()
+
+    # Send the current full state as an initial snapshot.
+    snapshot = ingestor.state.get_all()
+    await websocket.send_text(
+        json.dumps({"type": "snapshot", "data": snapshot}, default=str)
+    )
+
+    # Register this client with the broadcaster.
+    queue: asyncio.Queue = asyncio.Queue()
+    broadcaster.add_client(queue)
+
+    try:
+        while True:
+            msg = await queue.get()
+            await websocket.send_text(msg)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        broadcaster.remove_client(queue)

@@ -1,5 +1,6 @@
 # Dev tools
 .claude/
+claude.md
 memory/
 
 # Python
@@ -45,3 +46,6 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# gitignore
+.gitignore
